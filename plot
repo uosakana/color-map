@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize, LinearSegmentedColormap
+from matplotlib.colors import LinearSegmentedColormap, PowerNorm
 import re
 
 # 配置字体
@@ -42,52 +42,71 @@ def main():
 0	0	0	0.047596739	5.221436281	33.52230905
     """
     
-    # 通道之间的间距（按顺序对应）
-    # channel2与3之间:400nm, channel3与4之间:500nm, 以此类推
-    channel_spacings = [400, 500, 600, 700, 800]
+    # 通道间距（已修正顺序）
+    channel_spacings = [800, 700, 600, 500, 400]
+    square_width = 150  # 方块宽度（相对单位）
     
     try:
         # 1. 解析数据
         data = parse_raw_data(raw_data)
-        print(f"Original data shape: {data.shape[0]} rows x {data.shape[1]} columns")
+        num_rows, num_cols = data.shape
+        print(f"Original data shape: {num_rows} rows x {num_cols} columns")
         
         # 2. 归一化处理
         normalized_data = normalize_columns(data)
         print("Completed column-wise normalization (max normalization)")
         
-        # 3. 定义标签
-        num_rows, num_cols = normalized_data.shape
+        # 3. 分析数据分布（辅助颜色映射优化）
+        flat_data = normalized_data.flatten()
+        print(f"数据分布: 最小值={flat_data.min():.3f}, 最大值={flat_data.max():.3f}")
+        print(f"0-0.2区间数据占比: {np.mean(flat_data <= 0.2):.1%}")
+        
+        # 4. 定义标签
         row_labels = [f"irradiate point {i+2}" for i in range(num_rows)]
-        col_labels = [f"channel {i+2}" for i in range(num_cols)]  # channel2到channel7
+        col_labels = [f"channel {i+2}" for i in range(num_cols)]
         
-        # 4. 蓝色系颜色映射
+        # 5. 计算方块位置（物理间距可视化）
+        x_positions = [0]
+        for spacing in channel_spacings:
+            next_pos = x_positions[-1] + square_width + (spacing / 10)
+            x_positions.append(next_pos)
+        total_width = x_positions[-1] + square_width
+        
+        # 6. 优化颜色映射（解决过渡问题的核心）
+        # 自定义蓝色系，增加低数值区域的颜色节点
         blue_cmap = LinearSegmentedColormap.from_list(
-            'smooth_blue',
+            'optimized_blue',
             [
-                (0.7, 0.85, 1.0, 0.9),    # 浅蓝色
-                (0.4, 0.65, 0.95, 0.9),   # 中浅蓝色
-                (0.2, 0.45, 0.85, 0.9),   # 中蓝色
-                (0.1, 0.3, 0.7, 0.9)      # 深蓝色
-            ]
-        )
-        norm = Normalize(
-            vmin=max(normalized_data.min(), 0.05),
-            vmax=min(normalized_data.max(), 0.95)
+                (0.9, 0.95, 1.0, 0.95),   # 接近0的值（更浅）
+                (0.7, 0.85, 1.0, 0.95),   # 低数值（0.1左右）
+                (0.5, 0.75, 1.0, 0.95),   # 中低数值（0.2左右）
+                (0.3, 0.6, 0.95, 0.95),   # 中高数值（0.5左右）
+                (0.15, 0.4, 0.85, 0.95)   # 高数值（1.0）- 避免过深
+            ],
+            N=100  # 增加插值点数，使过渡更平滑
         )
         
-        # 5. 创建画布，调整宽度以容纳所有标签和间距
+        # 非线性归一化：对低数值区域进行颜色拉伸，高数值区域压缩
+        # gamma < 1 会增强低数值区域的颜色区分度
+        norm = PowerNorm(gamma=0.4,  # 关键参数：值越小，低数值区域区分越明显
+                         vmin=flat_data.min(),
+                         vmax=flat_data.max())
+        
+        # 7. 创建画布
         fig, ax = plt.subplots(figsize=(14, 10), dpi=100)
         ax.spines['top'].set_linewidth(2)
         ax.spines['bottom'].set_linewidth(2)
         ax.spines['left'].set_linewidth(2)
         ax.spines['right'].set_linewidth(2)
         
-        # 6. 绘制矩阵方格
+        # 8. 绘制矩阵方格
         for i in range(num_rows):
             for j in range(num_cols):
+                x = x_positions[j]
                 value = normalized_data[i, j]
+                
                 rect = plt.Rectangle(
-                    (j, i), 1, 1, 
+                    (x, i), square_width, 1,
                     facecolor=blue_cmap(norm(value)),
                     edgecolor='none',
                     linewidth=0
@@ -96,18 +115,16 @@ def main():
                 
                 # 显示三位小数
                 ax.text(
-                    j + 0.5, i + 0.5, 
+                    x + square_width/2, i + 0.5,
                     f'{value:.3f}',
                     ha='center', va='center', 
                     fontsize=12,
                     fontweight='bold',
-                    color='white'
+                    color='white' if value > 0.3 else 'darkblue'  # 动态调整文字颜色
                 )
         
-        # 7. 配置x轴，为标签和间距创建复合刻度
-        # 主刻度位置（channel标签）
-        major_ticks = [j + 0.5 for j in range(num_cols)]
-        ax.set_xticks(major_ticks)
+        # 9. 配置坐标轴
+        ax.set_xticks([x + square_width/2 for x in x_positions])
         ax.set_xticklabels(
             col_labels, 
             fontsize=11, 
@@ -116,27 +133,34 @@ def main():
             ha='center'
         )
         
-        # 在channel标签之间添加间距标签
+        # 添加间距标签
         for j in range(num_cols - 1):
-            # 间距标签位置：两个channel标签的正中间
-            spacing_pos = j + 1.0  # 正好在两个channel中间
+            spacing_x = x_positions[j] + square_width + (x_positions[j+1] - (x_positions[j] + square_width))/2
             
-            # 添加垂直线分隔（可选）
-            ax.axvline(x=spacing_pos, ymin=0, ymax=-0.05, color='#999999', linestyle=':')
+            ax.plot(
+                [spacing_x, spacing_x], 
+                [0, num_rows],
+                color='#f0f0f0',
+                linewidth=2
+            )
             
-            # 添加间距值标签
             ax.text(
-                spacing_pos, -0.15,  # 位于x轴下方，两个channel标签之间
+                spacing_x, -0.3,
                 f'{channel_spacings[j]}nm',
                 ha='center', 
                 va='top',
                 fontsize=10,
                 fontweight='medium',
                 color='#333333',
-                rotation=0
+                bbox=dict(
+                    boxstyle='round,pad=0.2',
+                    fc='white',
+                    ec='#ddd',
+                    alpha=0.9
+                )
             )
         
-        # 配置y轴
+        # Y轴配置
         ax.set_yticks([i + 0.5 for i in range(num_rows)])
         ax.set_yticklabels(
             row_labels, 
@@ -144,14 +168,11 @@ def main():
             fontweight='bold'
         )
         
-        # 设置轴范围
-        ax.set_xlim(0, num_cols)
+        ax.set_xlim(0, total_width)
         ax.set_ylim(0, num_rows)
-        
-        # 反转y轴使第一行在上方
         ax.invert_yaxis()
         
-        # 8. 添加颜色条
+        # 10. 添加优化的颜色条（反映非线性映射）
         cbar = plt.colorbar(
             plt.cm.ScalarMappable(norm=norm, cmap=blue_cmap), 
             ax=ax,
@@ -166,16 +187,25 @@ def main():
         )
         cbar.ax.tick_params(labelsize=10, width=1.5)
         
-        # 9. 整体美化
+        # 11. 整体美化
         ax.set_title(
-            '6×6 Matrix Heatmap', 
+            'Heatmap with Optimized Color Transition', 
             fontsize=16, 
             pad=20, 
             fontweight='bold'
         )
         
-        # 调整底部边距
-        plt.subplots_adjust(bottom=0.15)
+        ax.text(
+            total_width/2, -0.6,
+            'Enhanced color distinction for low values',
+            ha='center',
+            va='top',
+            fontsize=11,
+            fontweight='bold',
+            color='#333333'
+        )
+        
+        plt.subplots_adjust(bottom=0.2)
         ax.set_facecolor('#f0f0f0')
         plt.tight_layout()
         plt.show()
