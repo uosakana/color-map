@@ -43,7 +43,7 @@ def main():
     """
     
     # 通道间距（已修正顺序）
-    channel_spacings = [800, 700, 600, 500, 400]
+    channel_spacings = [900, 800, 700, 600, 500]
     square_width = 150  # 方块宽度（相对单位）
     
     try:
@@ -62,7 +62,7 @@ def main():
         print(f"0-0.2区间数据占比: {np.mean(flat_data <= 0.2):.1%}")
         
         # 4. 定义标签
-        row_labels = [f"irradiate point {i+2}" for i in range(num_rows)]
+        row_labels = [f"channel{i+2}" for i in range(num_rows)]
         col_labels = [f"channel {i+2}" for i in range(num_cols)]
         
         # 5. 计算方块位置（物理间距可视化）
@@ -88,7 +88,8 @@ def main():
         
         # 非线性归一化：对低数值区域进行颜色拉伸，高数值区域压缩
         # gamma < 1 会增强低数值区域的颜色区分度
-        norm = PowerNorm(gamma=0.4,  # 关键参数：值越小，低数值区域区分越明显
+        gamma = 0.6  # 调整此值以控制高值色彩压缩程度
+        norm = PowerNorm(gamma=gamma,
                          vmin=flat_data.min(),
                          vmax=flat_data.max())
         
@@ -123,51 +124,39 @@ def main():
                     color='white' if value > 0.3 else 'darkblue'  # 动态调整文字颜色
                 )
         
-        # 9. 配置坐标轴
-        ax.set_xticks([x + square_width/2 for x in x_positions])
+        # 9. 配置坐标轴（交替显示通道和间距标签）
+        tick_positions = []
+        tick_labels = []
+        for j in range(num_cols):
+            channel_center = x_positions[j] + square_width / 2
+            tick_positions.append(channel_center)
+            tick_labels.append(col_labels[j])
+
+            if j < num_cols - 1:
+                spacing_x = x_positions[j] + square_width + (x_positions[j + 1] - (x_positions[j] + square_width)) / 2
+                tick_positions.append(spacing_x)
+                tick_labels.append(f"{channel_spacings[j]}nm")
+
+        ax.set_xticks(tick_positions)
         ax.set_xticklabels(
-            col_labels, 
-            fontsize=11, 
+            tick_labels,
+            fontsize=11,
             fontweight='bold',
             rotation=0,
             ha='center'
         )
-        
-        # 添加间距标签
-        for j in range(num_cols - 1):
-            spacing_x = x_positions[j] + square_width + (x_positions[j+1] - (x_positions[j] + square_width))/2
-            
-            ax.plot(
-                [spacing_x, spacing_x], 
-                [0, num_rows],
-                color='#f0f0f0',
-                linewidth=2
-            )
-            
-            ax.text(
-                spacing_x, -0.3,
-                f'{channel_spacings[j]}nm',
-                ha='center', 
-                va='top',
-                fontsize=10,
-                fontweight='medium',
-                color='#333333',
-                bbox=dict(
-                    boxstyle='round,pad=0.2',
-                    fc='white',
-                    ec='#ddd',
-                    alpha=0.9
-                )
-            )
+        ax.set_xlabel('test', fontsize=13, fontweight='bold')
+
         
         # Y轴配置
         ax.set_yticks([i + 0.5 for i in range(num_rows)])
         ax.set_yticklabels(
-            row_labels, 
-            fontsize=11, 
+            row_labels,
+            fontsize=11,
             fontweight='bold'
         )
-        
+        ax.set_ylabel('irradiate', fontsize=12, fontweight='bold')
+
         ax.set_xlim(0, total_width)
         ax.set_ylim(0, num_rows)
         ax.invert_yaxis()
@@ -187,6 +176,12 @@ def main():
         )
         cbar.ax.tick_params(labelsize=10, width=1.5)
         
+        # 设置颜色条刻度与标签
+        N = 5  # 颜色条刻度数量
+        tick_values = np.linspace(flat_data.min(), flat_data.max(), N)
+        cbar.set_ticks(tick_values)
+        cbar.set_ticklabels([f"{v:.2f}" for v in tick_values])
+
         # 11. 整体美化
         ax.set_title(
             'Heatmap with Optimized Color Transition', 
@@ -195,17 +190,7 @@ def main():
             fontweight='bold'
         )
         
-        ax.text(
-            total_width/2, -0.6,
-            'Enhanced color distinction for low values',
-            ha='center',
-            va='top',
-            fontsize=11,
-            fontweight='bold',
-            color='#333333'
-        )
-        
-        plt.subplots_adjust(bottom=0.2)
+
         ax.set_facecolor('#f0f0f0')
         plt.tight_layout()
         plt.show()
@@ -215,3 +200,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
